@@ -142,15 +142,55 @@ class AccountCultivationAgent(BaseAgent):
 
         health.last_action_type = action
 
+    def _generate_comment(self, post_title: str, post_body: str, subreddit: str, allow_promo: bool, product_context: str) -> str:
+        """Ask Claude to write a human reply to a specific Reddit post."""
+        system = """You write Reddit comments that sound like a real person typed them.
+
+Rules (never break these):
+- Simple everyday English. Short sentences. No fancy words.
+- Max 3 sentences. Sometimes just 1-2 is better.
+- Never start with "I", "Great", "This", "That's", "Wow", "Oh"
+- No exclamation marks unless absolutely natural
+- No em-dashes, no "As someone who...", no "Honestly,"
+- Sound like you're replying to a friend, not writing an essay
+- If you relate to the post, say so plainly
+- Typos and informal grammar are fine (dont, its, wanna, gonna)
+- Never sound like marketing copy
+
+Warmup mode (no product): just be a helpful, relatable person in the community.
+Promo mode: if the post is genuinely relevant, you can mention the product once, naturally, like you're sharing something you found useful — never as an ad."""
+
+        promo_instruction = ""
+        if allow_promo and product_context:
+            promo_instruction = f"\n\nProduct you can mention if naturally relevant: {product_context}"
+
+        user_msg = (
+            f"Subreddit: r/{subreddit}\n"
+            f"Post title: {post_title}\n"
+            f"Post body: {post_body[:400] if post_body else '(no body)'}\n"
+            f"{promo_instruction}\n\n"
+            f"Write a reply. Just the comment text, nothing else."
+        )
+
+        return self.call_llm_text(system=system, messages=[{"role": "user", "content": user_msg}], max_tokens=150)
+
     def _do_comments(self, health: AccountHealth, campaign_id: str):
-        """Post 2-4 comments in karma-building subreddits."""
+        """Post 2-4 comments, each written specifically for the target post."""
         from tools.reddit_chrome import get_new_posts, post_comment, get_me
-        from db.models import ContentPiece as DBPiece
+        from db.models import Product as DBProduct
 
         me = get_me()
         if not me:
             return
         modhash = me.get("modhash", "")
+
+        # Load product context for promo phase
+        allow_promo = health.warmup_phase == "promo"
+        product_context = ""
+        if allow_promo:
+            product = self.db.query(DBProduct).filter_by(id=campaign_id).first()
+            if product:
+                product_context = f"{product.name} ({product.url}) — {product.description or ''}"
 
         karma_subs = ["NoStupidQuestions", "CasualConversation", "AskReddit"]
         random.shuffle(karma_subs)
@@ -163,32 +203,30 @@ class AccountCultivationAgent(BaseAgent):
             posts = get_new_posts(sr, limit=15)
             if not posts:
                 continue
-            # Pick a post with few comments (early = more visible)
+
+            # Pick posts with few comments — fresh posts get more visibility
             candidates = [p for p in posts if p.get("num_comments", 99) < 10]
             if not candidates:
                 candidates = posts[:5]
             post = random.choice(candidates)
 
-            # Use a warmup-mode ContentPiece if available, else skip
-            piece = self.db.query(DBPiece).filter(
-                DBPiece.campaign_id == campaign_id,
-                DBPiece.platform == "reddit",
-                DBPiece.content_type == "comment",
-                DBPiece.warmup_mode == True,
-                DBPiece.status == "draft",
-            ).first()
-
-            if not piece:
-                logger.info("[%s] No warmup comment content available for %s", self.name, sr)
+            # Generate a comment specifically for this post
+            try:
+                comment_text = self._generate_comment(
+                    post_title=post.get("title", ""),
+                    post_body=post.get("selftext", ""),
+                    subreddit=sr,
+                    allow_promo=allow_promo,
+                    product_context=product_context,
+                )
+            except Exception as e:
+                logger.warning("[%s] Comment generation failed: %s", self.name, e)
                 continue
 
-            result = post_comment(post["id"], piece.body, modhash)
+            result = post_comment(post["id"], comment_text, modhash)
             if result:
-                piece.status = "posted"
-                piece.posted_at = datetime.utcnow()
-                self.db.commit()
                 commented += 1
-                logger.info("[%s] Commented in r/%s", self.name, sr)
+                logger.info("[%s] Commented in r/%s on: %s", self.name, sr, post.get("title", "")[:50])
                 time.sleep(random.uniform(60, 180))
 
     def _do_post(self, health: AccountHealth, strategy: ChannelStrategy, campaign_id: str):
