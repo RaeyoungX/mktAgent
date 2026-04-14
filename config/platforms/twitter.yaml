@@ -1,0 +1,10 @@
+# Twitter/X platform settings
+# No credentials stored here — Chrome must be logged in already.
+rate_limits:
+  between_tweets_seconds: [30, 90]
+  max_tweets_per_day: 5
+  max_replies_per_day: 10
+
+content:
+  max_chars: 280
+  thread_max_posts: 6

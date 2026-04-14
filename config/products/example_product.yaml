@@ -1,0 +1,26 @@
+campaign_id: "prod_example_001"
+product:
+  name: "YourProduct"
+  url: "https://yourproduct.com"
+  scrape_on_start: true
+
+platforms:
+  reddit:
+    enabled: true
+    accounts:
+      - "your_reddit_username"
+    target_subreddits:
+      - "r/travel"
+      - "r/China"
+  xhs:
+    enabled: false
+  twitter:
+    enabled: false
+  linkedin:
+    enabled: false
+
+scheduling:
+  timezone: "Asia/Shanghai"
+  campaign_run_cron: "0 9 * * *"        # daily at 9am
+  feedback_check_cron: "0 18 * * *"     # daily at 6pm
+  content_generation_cron: "0 8 * * 1"  # weekly Monday 8am

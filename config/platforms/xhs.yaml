@@ -1,0 +1,13 @@
+# Xiaohongshu platform settings
+# Reads: xhs SDK (cookie-based, set XHS_COOKIES env var)
+# Writes: computer-use MCP (screenshot + click in real Chrome)
+rate_limits:
+  between_notes_seconds: [120, 240]
+  max_notes_per_day: 2
+
+content:
+  max_chars: 1000
+  recommended_chars: 300
+  use_emojis: true
+  use_hashtags: true
+  max_hashtags: 10

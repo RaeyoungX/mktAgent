@@ -1,0 +1,9 @@
+# LinkedIn platform settings
+# No credentials stored here — Chrome must be logged in already.
+rate_limits:
+  between_posts_seconds: [120, 300]
+  max_posts_per_week: 3
+
+content:
+  max_chars: 3000
+  recommended_chars: 1200

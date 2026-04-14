@@ -1,0 +1,17 @@
+# Reddit platform settings
+# No credentials stored here — Chrome must be logged in already.
+rate_limits:
+  between_posts_seconds: [60, 180]      # random range (seconds)
+  max_posts_per_week: 2
+  max_comments_per_day: 4
+  max_product_mentions_per_session: 2
+
+warmup_thresholds:
+  lurk_days: 3                          # account age < 3 days → lurk only
+  warmup_karma: 600                     # karma < 600 → warmup mode
+  # karma >= 600 → promo mode
+
+karma_subreddits:                       # subreddits used to build karma (non-product)
+  - "r/NoStupidQuestions"
+  - "r/CasualConversation"
+  - "r/AskReddit"

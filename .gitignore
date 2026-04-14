@@ -1,0 +1,28 @@
+# Environment & secrets
+.env
+*.env
+
+# Database
+db/*.db
+db/*.db-shm
+db/*.db-wal
+
+# Logs
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# macOS
+.DS_Store
+
+# NiceGUI cache
+.nicegui/

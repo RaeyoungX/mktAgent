@@ -1,0 +1,17 @@
+# Scheduled jobs — loaded by scheduler.py
+# Each job maps to a campaign + list of agents to run.
+jobs:
+  - name: "daily_operate"
+    cron: "0 9 * * *"
+    campaign_id: "prod_example_001"
+    agents: ["account_cultivation", "distribution"]
+
+  - name: "daily_feedback"
+    cron: "0 18 * * *"
+    campaign_id: "prod_example_001"
+    agents: ["feedback"]
+
+  - name: "weekly_analyze_and_content"
+    cron: "0 8 * * 1"
+    campaign_id: "prod_example_001"
+    agents: ["product_analysis", "channel", "content"]
