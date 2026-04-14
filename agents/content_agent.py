@@ -11,24 +11,27 @@ from schemas.content import ContentBatch, ContentPiece
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a professional content creator who writes platform-native content.
-You adapt voice, format, length, and tone precisely per platform.
+SYSTEM_PROMPT = """You write social content that blends in — not content that screams "marketing".
 
-Platform writing rules:
-- reddit: No hashtags. Casual, first-person. Lowercase "i" is fine. Sounds typed at 1am.
-  Forbidden: "So,", "Just wanted to share", em-dash overuse, ending with questions every time.
-  Titles: 6-12 words. Relatable, not clickbait. Body: 3-6 sentences for casual, 2 paragraphs for detailed.
-- xhs (小红书): Chinese language. Emojis throughout. Punchy opening line. Short paragraphs.
-  Hashtags in Chinese at the end. Visual descriptions welcome.
-- twitter: 280 chars OR a thread (max 6 posts). Conversational. Max 2 hashtags.
-  Thread format: each tweet self-contained but builds on the last.
-- linkedin: Professional but personal. Thought leadership. Start with a hook. 3-5 short paragraphs.
-  End with a question or observation. No more than 3 hashtags.
+Your job: read the real examples from the community, absorb their voice, then write new posts that sound like they came from the same people.
 
-Warmup content (warmup_mode=true): NO product mention. Focus on the topic/community.
-Promo content (product_mention_allowed=true): mention naturally, never lead with it.
+Universal rules (never break):
+- Simple everyday words. Short sentences. No fancy vocabulary.
+- No em-dashes, no "As someone who...", no "In today's world", no "It's worth noting"
+- No exclamation marks unless extremely natural
+- Don't start with "I" or "So," or "Just wanted to"
+- Sounds like a real person typed it quickly, not a content team
+- Typos and informal grammar are fine (dont, its, wanna, gonna, tbh, ngl)
+- Never sound like an ad, a press release, or a LinkedIn influencer
 
-For each piece, also provide media_prompts (what image/graphic would help this post).
+Platform specifics:
+- reddit: match the exact tone of the example posts provided. titles: specific and relatable, not clickbait. body: conversational, 2-5 sentences max for simple posts.
+- xhs: Chinese. emojis throughout. punchy first line. short paragraphs. Chinese hashtags at end.
+- twitter: 280 chars or thread (max 6). casual. max 2 hashtags.
+- linkedin: professional but personal. hook first. 3-5 short paragraphs. end with observation.
+
+Warmup content: NO product mention. Just be a real community member.
+Promo content: mention product once, naturally, only if it genuinely fits — never lead with it.
 """
 
 
@@ -109,9 +112,19 @@ class ContentAgent(BaseAgent):
         )
 
         if platform == "reddit":
-            subreddits = platform_strategy.subreddits or ["r/general"]
+            subreddits = platform_strategy.subreddits or ["r/travel"]
             user_msg += f"Target subreddits: {', '.join(subreddits)}\n"
             user_msg += "Rotate pieces across different subreddits.\n"
+
+            # Fetch real posts as style reference
+            examples = self._fetch_reddit_examples(subreddits)
+            if examples:
+                user_msg += "\nReal posts from these communities (study their voice and style):\n"
+                for ex in examples:
+                    user_msg += f"---\nTitle: {ex['title']}\n"
+                    if ex.get("body"):
+                        user_msg += f"Body: {ex['body']}\n"
+                user_msg += "---\nMatch this community's tone exactly. Do NOT copy — write new content in the same voice.\n"
 
         if platform == "xhs":
             user_msg += "Write in Chinese. Include relevant Chinese hashtags.\n"
@@ -157,6 +170,50 @@ class ContentAgent(BaseAgent):
             full_pieces.append(piece)
 
         return full_pieces
+
+    def _fetch_reddit_examples(self, subreddits: list[str], per_sub: int = 3) -> list[dict]:
+        """Fetch real hot posts from subreddits as style reference. Uses public API, no auth needed."""
+        import requests
+        headers = {"User-Agent": "mktAgent/1.0"}
+        examples = []
+        seen_titles: set[str] = set()
+
+        for sr in subreddits[:2]:  # max 2 subreddits to keep prompt size reasonable
+            sr_name = sr.lstrip("r/")
+            try:
+                resp = requests.get(
+                    f"https://www.reddit.com/r/{sr_name}/hot.json",
+                    params={"limit": 10},
+                    headers=headers,
+                    timeout=8,
+                )
+                if resp.status_code != 200:
+                    continue
+                posts = resp.json().get("data", {}).get("children", [])
+                count = 0
+                for child in posts:
+                    p = child.get("data", {})
+                    title = p.get("title", "")
+                    body = (p.get("selftext") or "").strip()
+                    # Skip mod posts, pinned, or very short posts
+                    if p.get("stickied") or not title or title in seen_titles:
+                        continue
+                    # Skip link posts (no body) unless title is strong
+                    if not body and len(title.split()) < 5:
+                        continue
+                    seen_titles.add(title)
+                    examples.append({
+                        "title": title,
+                        "body": body[:300] if body else "",
+                        "subreddit": sr_name,
+                    })
+                    count += 1
+                    if count >= per_sub:
+                        break
+            except Exception as e:
+                logger.warning("[content] Failed to fetch examples from r/%s: %s", sr_name, e)
+
+        return examples
 
     def _save(self, batch: ContentBatch):
         from db.models import ContentPiece as DBPiece
