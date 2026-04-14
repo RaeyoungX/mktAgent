@@ -128,15 +128,62 @@ class ChannelAgent(BaseAgent):
         )
         return result.keywords
 
+    def _score_subreddits(self, candidates: list[dict], product: ProductAnalysis) -> list[dict]:
+        """Ask Claude to score each candidate subreddit 0-10 for relevance to the product."""
+        from pydantic import BaseModel
+
+        class SubredditScore(BaseModel):
+            name: str
+            score: int  # 0-10
+
+        class ScoreOutput(BaseModel):
+            scores: list[SubredditScore]
+
+        lines = "\n".join(
+            f"r/{s['name']} ({s['subscribers']:,} subs) — {s['description']}"
+            for s in candidates
+        )
+
+        result = self.call_llm(
+            system="You are a Reddit community analyst. Score each subreddit's relevance to a product strictly and honestly.",
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"Product: {product.product_name}\n"
+                    f"Description: {product.description}\n"
+                    f"Target audience: {product.target_audience.primary}\n"
+                    f"Pain points: {', '.join(product.pain_points_solved[:3])}\n\n"
+                    f"Score each subreddit 0-10 for how relevant it is for promoting this product:\n"
+                    f"- 9-10: community is exactly about this product's topic, very high chance of receptive audience\n"
+                    f"- 7-8: community is related and audience would care\n"
+                    f"- 5-6: tangentially related, audience might care\n"
+                    f"- 0-4: not relevant, posting here would feel off-topic or spammy\n\n"
+                    f"Subreddits to score:\n{lines}"
+                ),
+            }],
+            output_model=ScoreOutput,
+            max_tokens=800,
+        )
+
+        # Claude sometimes returns names with r/ prefix — strip it
+        score_map = {s.name.lstrip("r/").lower(): s.score for s in result.scores}
+        for s in candidates:
+            s["relevance_score"] = score_map.get(s["name"].lower(), 0)
+
+        # Keep only score >= 7, sort by score desc then subscribers desc
+        filtered = [s for s in candidates if s["relevance_score"] >= 7]
+        filtered.sort(key=lambda x: (x["relevance_score"], x["subscribers"]), reverse=True)
+        logger.info("[channel] Scored %d candidates, %d passed relevance filter (>=7)", len(candidates), len(filtered))
+        return filtered
+
     def _discover_subreddits(self, product: ProductAnalysis) -> list[dict]:
-        """Search Reddit public API for real subreddits. No Chrome needed."""
+        """Search Reddit public API for real subreddits, then score for relevance."""
         import requests
 
         try:
             keywords = self._get_search_keywords(product)
         except Exception as e:
             logger.warning("[channel] keyword generation failed: %s", e)
-            # Fallback: use content themes directly
             keywords = product.content_themes[:4]
 
         logger.info("[channel] Searching subreddits for keywords: %s", keywords)
@@ -155,8 +202,7 @@ class ChannelAgent(BaseAgent):
                 )
                 if resp.status_code != 200:
                     continue
-                data = resp.json()
-                for child in data.get("data", {}).get("children", []):
+                for child in resp.json().get("data", {}).get("children", []):
                     s = child.get("data", {})
                     name = s.get("display_name", "")
                     subs = s.get("subscribers") or 0
@@ -172,9 +218,13 @@ class ChannelAgent(BaseAgent):
             except Exception as e:
                 logger.warning("[channel] subreddit search failed for '%s': %s", kw, e)
 
-        results.sort(key=lambda x: x["subscribers"], reverse=True)
-        logger.info("[channel] Discovered %d real subreddits (min 5k subscribers)", len(results))
-        return results[:15]
+        logger.info("[channel] Found %d candidate subreddits, scoring relevance...", len(results))
+
+        if not results:
+            return []
+
+        # Score and filter by relevance
+        return self._score_subreddits(results, product)
 
     def _save(self, campaign_id: str, strategy: ChannelStrategy):
         from db.models import ChannelStrategy as DBStrategy
