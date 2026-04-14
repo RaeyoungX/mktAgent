@@ -1,5 +1,6 @@
 """BaseAgent: shared LLM call pattern using tool_use for structured output."""
 
+import json
 import logging
 import os
 from typing import Any
@@ -60,6 +61,14 @@ class BaseAgent:
         )
 
         raw = response.content[0].input
+        # Claude sometimes returns list/dict fields as JSON strings — parse them
+        if isinstance(raw, dict):
+            for k, v in raw.items():
+                if isinstance(v, str) and (v.startswith("[") or v.startswith("{")):
+                    try:
+                        raw[k] = json.loads(v)
+                    except Exception:
+                        pass
         return output_model.model_validate(raw)
 
     def call_llm_text(

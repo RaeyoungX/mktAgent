@@ -116,12 +116,20 @@ class ContentAgent(BaseAgent):
         if platform == "xhs":
             user_msg += "Write in Chinese. Include relevant Chinese hashtags.\n"
 
-        # Use the base LLM call with a raw schema for a list of pieces
+        # Minimal schema — only fields Claude can actually fill
         from pydantic import BaseModel
         from typing import Optional
 
+        class LLMPiece(BaseModel):
+            content_type: str               # post / comment / thread / note
+            title: Optional[str] = None
+            body: str
+            hashtags: list[str] = []
+            media_prompts: list[str] = []
+            target_subreddit: Optional[str] = None
+
         class PiecesOutput(BaseModel):
-            pieces: list[ContentPiece]
+            pieces: list[LLMPiece]
 
         result = self.call_llm(
             system=SYSTEM_PROMPT,
@@ -130,15 +138,25 @@ class ContentAgent(BaseAgent):
             max_tokens=4096,
         )
 
-        # Stamp fields that the LLM won't know
-        for piece in result.pieces:
-            piece.campaign_id = campaign_id
-            piece.platform = platform
-            piece.warmup_mode = in_warmup
-            piece.product_mention_allowed = in_promo
-            piece.status = "draft"
+        # Stamp fields that the LLM doesn't know
+        full_pieces = []
+        for llm_piece in result.pieces:
+            piece = ContentPiece(
+                campaign_id=campaign_id,
+                platform=platform,
+                content_type=llm_piece.content_type,
+                title=llm_piece.title,
+                body=llm_piece.body,
+                hashtags=llm_piece.hashtags,
+                media_prompts=llm_piece.media_prompts,
+                target_subreddit=llm_piece.target_subreddit,
+                warmup_mode=in_warmup,
+                product_mention_allowed=in_promo,
+                status="draft",
+            )
+            full_pieces.append(piece)
 
-        return result.pieces
+        return full_pieces
 
     def _save(self, batch: ContentBatch):
         from db.models import ContentPiece as DBPiece
