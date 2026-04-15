@@ -180,3 +180,16 @@ class FeedbackReport(Base):
     campaign_id = Column(String, nullable=False, index=True)
     report_json = Column(JSON, nullable=False)   # FeedbackReport Pydantic dict
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SubredditPerformance(Base):
+    """Tracks per-subreddit metrics over time."""
+    __tablename__ = "subreddit_performance"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    campaign_id = Column(String, nullable=False, index=True)
+    subreddit = Column(String, nullable=False)
+    post_score = Column(Integer, default=0)
+    num_comments = Column(Integer, default=0)
+    upvote_ratio = Column(Float, default=0.0)
+    recorded_at = Column(DateTime, default=datetime.utcnow)

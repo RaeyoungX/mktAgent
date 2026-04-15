@@ -50,7 +50,7 @@ class BaseAgent:
         response = self.client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=max_tokens,
-            system=system,
+            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             tools=[{
                 "name": "structured_output",
                 "description": "Return the structured result in the exact schema provided.",
@@ -81,7 +81,7 @@ class BaseAgent:
         response = self.client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=max_tokens,
-            system=system,
+            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             messages=messages,
         )
         return response.content[0].text

@@ -1,6 +1,7 @@
 """ContentAgent: generates platform-specific content batches."""
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from sqlalchemy.orm import Session
 
@@ -65,13 +66,18 @@ class ContentAgent(BaseAgent):
         account_phases = account_phases or {}
         all_pieces: list[ContentPiece] = []
 
-        for platform_strategy in strategy.enabled_platforms():
-            platform = platform_strategy.platform
-            warmup_phase = account_phases.get(platform, "warmup")
-            pieces = self._generate_for_platform(
-                platform_strategy, product, campaign_id, week_number, warmup_phase
-            )
-            all_pieces.extend(pieces)
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {
+                executor.submit(self._generate_for_platform, ps, product, campaign_id, week_number, account_phases.get(ps.platform, "warmup")): ps.platform
+                for ps in strategy.enabled_platforms()
+            }
+            for future in as_completed(futures):
+                platform = futures[future]
+                try:
+                    pieces = future.result()
+                    all_pieces.extend(pieces)
+                except Exception as e:
+                    logger.error("[content] Platform %s failed: %s", platform, e)
 
         batch = ContentBatch(
             campaign_id=campaign_id,

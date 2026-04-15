@@ -128,7 +128,7 @@ class ChannelAgent(BaseAgent):
         )
         return result.keywords
 
-    def _score_subreddits(self, candidates: list[dict], product: ProductAnalysis) -> list[dict]:
+    def _score_subreddits(self, candidates: list[dict], product: ProductAnalysis, historical_notes: list[dict] = None) -> list[dict]:
         """Ask Claude to score each candidate subreddit 0-10 for relevance to the product."""
         from pydantic import BaseModel
 
@@ -144,6 +144,14 @@ class ChannelAgent(BaseAgent):
             for s in candidates
         )
 
+        history_block = ""
+        if historical_notes:
+            history_lines = "\n".join(
+                f"  r/{h['subreddit']}: {h['notes']}"
+                for h in historical_notes
+            )
+            history_block = f"\nHistorical performance notes from previous runs:\n{history_lines}\nUse these to boost scores for proven subreddits.\n"
+
         result = self.call_llm(
             system="You are a Reddit community analyst. Score each subreddit's relevance to a product strictly and honestly.",
             messages=[{
@@ -152,7 +160,8 @@ class ChannelAgent(BaseAgent):
                     f"Product: {product.product_name}\n"
                     f"Description: {product.description}\n"
                     f"Target audience: {product.target_audience.primary}\n"
-                    f"Pain points: {', '.join(product.pain_points_solved[:3])}\n\n"
+                    f"Pain points: {', '.join(product.pain_points_solved[:3])}\n"
+                    f"{history_block}\n"
                     f"Score each subreddit 0-10 for how relevant it is for promoting this product:\n"
                     f"- 9-10: community is exactly about this product's topic, very high chance of receptive audience\n"
                     f"- 7-8: community is related and audience would care\n"
@@ -174,11 +183,22 @@ class ChannelAgent(BaseAgent):
         filtered = [s for s in candidates if s["relevance_score"] >= 7]
         filtered.sort(key=lambda x: (x["relevance_score"], x["subscribers"]), reverse=True)
         logger.info("[channel] Scored %d candidates, %d passed relevance filter (>=7)", len(candidates), len(filtered))
+
+        # Record selected subreddits to FTS memory
+        from db.database import upsert_subreddit_memory
+        for s in filtered:
+            notes = f"score={s['relevance_score']} subs={s['subscribers']} desc={s['description']}"
+            try:
+                upsert_subreddit_memory(product.product_name, s["name"], notes)
+            except Exception as e:
+                logger.warning("[channel] Failed to upsert subreddit memory for r/%s: %s", s["name"], e)
+
         return filtered
 
     def _discover_subreddits(self, product: ProductAnalysis) -> list[dict]:
         """Search Reddit public API for real subreddits, then score for relevance."""
         import requests
+        from db.database import search_subreddit_memory
 
         try:
             keywords = self._get_search_keywords(product)
@@ -187,6 +207,18 @@ class ChannelAgent(BaseAgent):
             keywords = product.content_themes[:4]
 
         logger.info("[channel] Searching subreddits for keywords: %s", keywords)
+
+        # Prepend historical FTS memory to help Claude make better choices
+        historical_notes = []
+        for kw in keywords[:3]:
+            try:
+                hits = search_subreddit_memory(product.product_name, kw, limit=3)
+                historical_notes.extend(hits)
+            except Exception as e:
+                logger.warning("[channel] FTS search failed for '%s': %s", kw, e)
+
+        if historical_notes:
+            logger.info("[channel] Found %d historical subreddit notes from FTS memory", len(historical_notes))
 
         headers = {"User-Agent": "mktAgent/1.0 (community research)"}
         seen: set[str] = set()
@@ -224,7 +256,7 @@ class ChannelAgent(BaseAgent):
             return []
 
         # Score and filter by relevance
-        return self._score_subreddits(results, product)
+        return self._score_subreddits(results, product, historical_notes=historical_notes)
 
     def _save(self, campaign_id: str, strategy: ChannelStrategy):
         from db.models import ChannelStrategy as DBStrategy
