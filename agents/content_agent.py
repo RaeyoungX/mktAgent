@@ -100,6 +100,17 @@ class ContentAgent(BaseAgent):
         freq_map = {"daily": 7, "3x_per_week": 3, "2x_per_week": 2, "1x_per_week": 1}
         count = freq_map.get(platform_strategy.posting_frequency, 2)
 
+        # Load recently used themes to enforce diversity
+        from db.models import UsedContentTheme
+        cutoff = datetime.utcnow().replace(day=1)  # current month
+        used_themes = [
+            row.theme for row in self.db.query(UsedContentTheme).filter(
+                UsedContentTheme.campaign_id == campaign_id,
+                UsedContentTheme.platform == platform,
+                UsedContentTheme.used_at >= cutoff,
+            ).all()
+        ]
+
         user_msg = (
             f"Generate {count} content pieces for {platform}.\n\n"
             f"Product: {product.product_name} — {product.description}\n"
@@ -110,6 +121,9 @@ class ContentAgent(BaseAgent):
             f"Account warmup phase: {warmup_phase}\n"
             f"Product mention allowed: {'YES — mention naturally, never lead with it' if in_promo else 'NO — warmup content only, no product mention'}\n"
         )
+        if used_themes:
+            user_msg += f"\nThemes already used this month (avoid repeating these angles): {', '.join(set(used_themes))}\n"
+            user_msg += "Each piece must cover a different angle from the ones above.\n"
 
         if platform == "reddit":
             subreddits = platform_strategy.subreddits or ["r/travel"]
@@ -168,6 +182,17 @@ class ContentAgent(BaseAgent):
                 status="draft",
             )
             full_pieces.append(piece)
+
+        # Record used themes for future diversity enforcement
+        from db.models import UsedContentTheme
+        for piece in full_pieces:
+            theme_hint = (piece.title or piece.body[:60]).strip()
+            self.db.add(UsedContentTheme(
+                campaign_id=campaign_id,
+                platform=platform,
+                theme=theme_hint,
+            ))
+        self.db.commit()
 
         return full_pieces
 

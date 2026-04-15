@@ -147,3 +147,36 @@ class SessionLog(Base):
     completed_at = Column(DateTime)
 
     campaign = relationship("Campaign", back_populates="session_logs")
+
+
+class CommentedPost(Base):
+    """Tracks Reddit post IDs we've already commented on — prevents duplicate comments."""
+    __tablename__ = "commented_posts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    post_id = Column(String, nullable=False, index=True)   # Reddit thing_id e.g. t3_abc123
+    subreddit = Column(String, nullable=False)
+    campaign_id = Column(String, nullable=False)
+    username = Column(String, nullable=False)
+    commented_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UsedContentTheme(Base):
+    """Tracks which content themes have been used recently to enforce diversity."""
+    __tablename__ = "used_content_themes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    campaign_id = Column(String, nullable=False)
+    platform = Column(String, nullable=False)
+    theme = Column(String, nullable=False)
+    used_at = Column(DateTime, default=datetime.utcnow)
+
+
+class FeedbackReport(Base):
+    """Persisted feedback reports so CMO can reference history across sessions."""
+    __tablename__ = "feedback_reports"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    campaign_id = Column(String, nullable=False, index=True)
+    report_json = Column(JSON, nullable=False)   # FeedbackReport Pydantic dict
+    created_at = Column(DateTime, default=datetime.utcnow)

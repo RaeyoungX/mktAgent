@@ -204,10 +204,22 @@ Promo mode: if the post is genuinely relevant, you can mention the product once,
             if not posts:
                 continue
 
+            # Filter out posts we've already commented on
+            from db.models import CommentedPost
+            already_commented = {
+                row.post_id for row in self.db.query(CommentedPost).filter_by(
+                    campaign_id=campaign_id, username=health.username, subreddit=sr
+                ).all()
+            }
+            posts = [p for p in posts if p.get("id") not in already_commented]
+
             # Pick posts with few comments — fresh posts get more visibility
             candidates = [p for p in posts if p.get("num_comments", 99) < 10]
             if not candidates:
                 candidates = posts[:5]
+            if not candidates:
+                logger.info("[%s] No new posts to comment on in r/%s", self.name, sr)
+                continue
             post = random.choice(candidates)
 
             # Generate a comment specifically for this post
@@ -225,6 +237,15 @@ Promo mode: if the post is genuinely relevant, you can mention the product once,
 
             result = post_comment(post["id"], comment_text, modhash)
             if result:
+                # Remember this post so we don't comment again
+                from db.models import CommentedPost
+                self.db.add(CommentedPost(
+                    post_id=post["id"],
+                    subreddit=sr,
+                    campaign_id=campaign_id,
+                    username=health.username,
+                ))
+                self.db.commit()
                 commented += 1
                 logger.info("[%s] Commented in r/%s on: %s", self.name, sr, post.get("title", "")[:50])
                 time.sleep(random.uniform(60, 180))

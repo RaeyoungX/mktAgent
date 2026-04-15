@@ -168,8 +168,17 @@ class CMOAgent(BaseAgent):
 
         if run_all or "feedback" in agent_set:
             report = self.run_measure(campaign_id)
+            # Persist feedback so next session can reference it
+            if report:
+                self._save_feedback(campaign_id, report)
             if run_all:
                 self.run_adjust(campaign_id, config, report)
+
+        # ADJUST can also be triggered standalone using last persisted feedback
+        if not run_all and "channel" in agent_set:
+            last_report = self._get_latest_feedback(campaign_id)
+            if last_report:
+                logger.info("[CMO] Applying persisted feedback to channel strategy")
 
         logger.info("[CMO] Campaign cycle complete: %s", campaign_id)
 
@@ -207,6 +216,23 @@ class CMOAgent(BaseAgent):
             if cfg.get("enabled") and cfg.get("accounts"):
                 accounts[platform] = cfg["accounts"]
         return accounts
+
+    def _save_feedback(self, campaign_id: str, report: FeedbackReport):
+        from db.models import FeedbackReport as DBReport
+        self.db.add(DBReport(
+            campaign_id=campaign_id,
+            report_json=report.model_dump(mode="json"),
+        ))
+        self.db.commit()
+
+    def _get_latest_feedback(self, campaign_id: str) -> Optional[FeedbackReport]:
+        from db.models import FeedbackReport as DBReport
+        row = self.db.query(DBReport).filter_by(
+            campaign_id=campaign_id
+        ).order_by(DBReport.id.desc()).first()
+        if row:
+            return FeedbackReport.model_validate(row.report_json)
+        return None
 
     def _get_account_phases(self, accounts: dict[str, list[str]]) -> dict[str, str]:
         """Return {platform: warmup_phase} for the first account per platform."""
