@@ -1,17 +1,20 @@
 # Scheduled jobs — loaded by scheduler.py
 # Each job maps to a campaign + list of agents to run.
 jobs:
+  # Daily: warmup accounts + post approved content (9am UTC)
   - name: "daily_operate"
     cron: "0 9 * * *"
-    campaign_id: "prod_example_001"
+    campaign_id: "d2f5684b-b805-4226-a588-0253f2cad033"
     agents: ["account_cultivation", "distribution"]
 
+  # Daily: collect post metrics (6pm UTC)
   - name: "daily_feedback"
     cron: "0 18 * * *"
-    campaign_id: "prod_example_001"
+    campaign_id: "d2f5684b-b805-4226-a588-0253f2cad033"
     agents: ["feedback"]
 
-  - name: "weekly_analyze_and_content"
+  # Weekly Monday: refresh channel strategy + generate new content (8am UTC)
+  - name: "weekly_strategy_and_content"
     cron: "0 8 * * 1"
-    campaign_id: "prod_example_001"
-    agents: ["product_analysis", "channel", "content"]
+    campaign_id: "d2f5684b-b805-4226-a588-0253f2cad033"
+    agents: ["channel", "content"]

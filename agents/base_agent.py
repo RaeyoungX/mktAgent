@@ -11,6 +11,20 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 
+def _parse_json_strings(obj):
+    """Recursively parse any JSON strings inside dicts/lists returned by Claude."""
+    if isinstance(obj, dict):
+        return {k: _parse_json_strings(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_parse_json_strings(v) for v in obj]
+    if isinstance(obj, str) and (obj.startswith("[") or obj.startswith("{")):
+        try:
+            return _parse_json_strings(json.loads(obj))
+        except Exception:
+            pass
+    return obj
+
+
 def _pydantic_to_input_schema(model_class: type[BaseModel]) -> dict:
     """Convert a Pydantic model to an Anthropic tool input_schema."""
     schema = model_class.model_json_schema()
@@ -61,15 +75,7 @@ class BaseAgent:
         )
 
         raw = response.content[0].input
-        # Claude sometimes returns list/dict fields as JSON strings — parse them
-        if isinstance(raw, dict):
-            for k, v in raw.items():
-                if isinstance(v, str) and (v.startswith("[") or v.startswith("{")):
-                    try:
-                        raw[k] = json.loads(v)
-                    except Exception:
-                        pass
-        return output_model.model_validate(raw)
+        return output_model.model_validate(_parse_json_strings(raw))
 
     def call_llm_text(
         self,
